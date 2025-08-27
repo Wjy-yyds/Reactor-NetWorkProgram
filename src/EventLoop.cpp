@@ -4,6 +4,7 @@
 
 
 #include "EventLoop.h"
+#include <sys/eventfd.h>
 #include <iostream>
 using std::cout;
 using std::cerr;
@@ -18,11 +19,14 @@ using std::endl;
  * @param acc
  */
 EventLoop::EventLoop(Acceptor & acc) 
-: _epfd(createEpollFd())
-, _evlist(1024)
-, _isLooping(false)
-, _acceptor(acc)
-, _conns()
+    : _epfd(createEpollFd())
+    , _evlist(1024)
+    , _isLooping(false)
+    , _acceptor(acc)
+    , _conns()
+    , _evtfd(createEventfd())
+    , _pendings()
+    , _mutex()
 {
     //因为数据成员vector是在epoll_wait函数中充当就绪列表
     //所以一定预留存放元素的空间
@@ -33,6 +37,9 @@ EventLoop::EventLoop(Acceptor & acc)
     //要listenfd，需要Acceptor中添加一个函数来获取
     int listenfd = _acceptor.fd();
     addEpollReadFd(listenfd);
+
+    //也要监听用于通知的文件描述符
+    addEpollReadFd(_evtfd);
 }
 
 EventLoop::~EventLoop() {
@@ -148,6 +155,15 @@ void EventLoop::waitEpollFd() {
             {
                 handleNewConnection();
             }
+            else if(fd == _evtfd)
+            {
+                //针对eventfd进行读操作，
+                //也就是将计数器清空
+                handleRead();
+
+                //收到通知之后，执行任务
+                doPendingFunctors();
+            }
             else
             {
                 //老的连接有数据传入
@@ -175,8 +191,8 @@ void EventLoop::handleNewConnection() {
 
     //利用代表连接的文件描述符connfd创建堆上的TcpConnection
     //交给shared_ptr管理
-    TcpConnectionPtr con(new TcpConnection(connfd));
-    
+    TcpConnectionPtr con(new TcpConnection(connfd,this));
+
     //创建完TcpConnection之后，它内部的function是空的
     //所以需要由EventLoop再做一次转交，让TcpConnection的function
     //也能关联外部的函数
@@ -242,3 +258,67 @@ void EventLoop::setCloseCallback(TcpConnectionCallback && cb)
 }
 
 
+int EventLoop::createEventfd()
+{
+    int fd = ::eventfd(0,0);
+    if(fd == -1)
+    {
+        perror("createEventfd");
+        return -1;
+    }
+    return fd;
+}
+
+void EventLoop::handleRead()
+{
+    uint64_t val = 1;
+    ssize_t ret = read(_evtfd,&val,sizeof(uint64_t));
+    if(ret != sizeof(uint64_t))
+    {
+        perror("handleRead");
+        return;
+    }
+}
+void EventLoop::wakeup()
+{
+    uint64_t val = 1;
+    ssize_t ret = write(_evtfd,&val,sizeof(uint64_t));
+    if(ret != sizeof(uint64_t))
+    {
+        perror("wakeup");
+        return;
+    }
+}
+
+void EventLoop::runInLoop(Functor && cb)
+{
+    {
+        lock_guard<mutex> lg(_mutex);
+        _pendings.push_back(std::move(cb));
+    }
+
+    //向计数器中写入数值
+    //主线程监听着eventfd，发现计数器中的值不为0，
+    //即代表eventfd就绪，相应地去执行任务
+    wakeup();
+}
+
+
+void EventLoop::doPendingFunctors()
+{
+    //针对EventLoop中的任务队列
+    //就类似于生产者消费者模型中的数据仓库
+    //生产者（子线程）向仓库中添加任务，是持有锁的
+    //消费者（主线程）从仓库中取走任务，也是持有锁的
+    vector<Functor> temp;
+    {
+        lock_guard<mutex> lg(_mutex);
+        temp.swap(_pendings);//一次性取走所有任务
+    }
+
+    //主线程自己慢慢执行
+    for(auto & cb : temp)
+    {
+        cb();
+    }
+}

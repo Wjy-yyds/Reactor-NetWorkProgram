@@ -39,6 +39,7 @@ private:
     TaskQueue m_que;
     bool m_isExit;
 
+
 //在doTask中调用，就是从任务队列中取任务以便后续执行
 ElemType getTask();
 

@@ -17,9 +17,17 @@ using std::shared_ptr;
 using std::function;
 
 class TcpConnection;
+class EventLoop;
 
 using TcpConnectionPtr = shared_ptr<TcpConnection>;
 using TcpConnectionCallback = function<void(const TcpConnectionPtr &)>;
+
+struct TcpMessage{
+    int tag;
+    int length;
+    std::string value;
+};
+
 
 class TcpConnection 
 : public std::enable_shared_from_this<TcpConnection>
@@ -29,7 +37,7 @@ public:
     /**
      * @param fd
      */
-    explicit TcpConnection(int fd);
+    TcpConnection(int fd, EventLoop * loop);
 
     ~TcpConnection();
 
@@ -41,6 +49,8 @@ public:
      * @param msg
      */
     void send(const string & msg);
+
+    void sendInLoop(const string & msg);
     
     //打印连接的信息
     string toString();
@@ -61,17 +71,24 @@ private:
     InetAddress getPeerAddr();
 
 private: 
+    //因为TcpConnection的sendInLoop中需要调用
+    //EventLoop的runInLoop函数
+    EventLoop * _loop;
+    
     SocketIO _sockIO;
 
     //为了打印信息加入的数据成员
     Socket _sock;
     InetAddress _localAddr;
     InetAddress _peerAddr;
+    TcpMessage Msg;
 
     //回调
     TcpConnectionCallback _onNewConnection;
     TcpConnectionCallback _onMessage;
     TcpConnectionCallback _onClose;
+
+    
 };
 
 #endif //_TCPCONNECTION_H

@@ -30,7 +30,7 @@ public:
      * @param cb2
      * @param cb3
      */
-    void setAllCallback(callback && cb1, callback && cb2, callback cb3);
+    void setAllCallback(callback && cb1, callback && cb2, callback && cb3);
 private: 
     Acceptor _acceptor;
     EventLoop _loop;

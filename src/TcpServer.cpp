@@ -31,7 +31,7 @@ TcpServer::~TcpServer() {
  * @param cb3
  * @return void
  */
-void TcpServer::setAllCallback(callback && cb1, callback && cb2, callback cb3) {
+void TcpServer::setAllCallback(callback && cb1, callback && cb2, callback && cb3) {
     _loop.setNewConnectionCallback(std::move(cb1));
     _loop.setMessageCallback(std::move(cb2));
     _loop.setCloseCallback(std::move(cb3));

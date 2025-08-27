@@ -4,11 +4,15 @@
 
 
 #include "TcpConnection.h"
+#include "EventLoop.h"
 #include <iostream>
 #include <sstream>
+#include <string>
+#include <cstring>
 using std::ostringstream;
 using std::cout;
 using std::endl;
+using std::string;
 
 /**
  * TcpConnection implementation
@@ -18,8 +22,9 @@ using std::endl;
 /**
  * @param fd
  */
-TcpConnection::TcpConnection(int fd)
-    : _sockIO(fd)
+TcpConnection::TcpConnection(int fd,EventLoop * loop)
+    : _loop(loop)
+    , _sockIO(fd)
     , _sock(fd)
     , _localAddr(getLocalAddr())
       , _peerAddr(getPeerAddr())
@@ -45,9 +50,18 @@ bool TcpConnection::isClosed()
  * @return string
  */
 string TcpConnection::receive() {
-    char buff[65535] = {0};
-    _sockIO.readLine(buff,sizeof(buff));
-    return string(buff);
+    // char buff[65535] = {0};
+    // _sockIO.readLine(buff,sizeof(buff));
+    // return string(buff);
+    char buff[1024] = {0};
+    TcpMessage msg;
+    _sockIO.readn((char*)&msg.tag, sizeof(msg.tag));
+    _sockIO.readn((char*)&msg.length, sizeof(msg.length));
+   char* valueBuff = new char[msg.length];
+    _sockIO.readn(valueBuff, msg.length);
+    msg.value = std::string(valueBuff, msg.length);
+    delete[] valueBuff;
+    
 }
 
 /**
@@ -56,6 +70,14 @@ string TcpConnection::receive() {
  */
 void TcpConnection::send(const string & msg) {
     _sockIO.writen(msg.c_str(),msg.size());
+}
+
+void TcpConnection::sendInLoop(const string & msg)
+{
+    if(_loop)
+    {
+        _loop->runInLoop(bind(&TcpConnection::send,this,msg));
+    }
 }
 
 //打印连接的信息
@@ -152,3 +174,6 @@ void TcpConnection::handleCloseCallback()
         cout << "_onClose == nullptr" << endl;
     }
 }
+
+
+
